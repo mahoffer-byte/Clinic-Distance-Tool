@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Image Measurement Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        #canvas-wrapper {
+            position: relative;
+            overflow: auto;
+            max-height: 70vh;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            background-color: #ffffff;
+            cursor: crosshair;
+            box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
+        }
+        canvas {
+            display: block;
+            /* The canvas scales visually but maintains its internal high-res coordinate system */
+            max-width: 100%;
+            height: auto;
+            transform-origin: top left;
+        }
+        
+        /* Custom scrollbar for the canvas wrapper */
+        #canvas-wrapper::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        #canvas-wrapper::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+            border-radius: 4px;
+        }
+        #canvas-wrapper::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        #canvas-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        .step-container {
+            display: none;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        .step-container.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Message Box styling */
+        #message-box {
+            transition: all 0.3s ease;
+            opacity: 0;
+            transform: translateY(-10px);
+            pointer-events: none;
+        }
+        #message-box.show {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body class="text-slate-800 h-screen flex flex-col">
+
+    <header class="bg-white border-b border-slate-200 shadow-sm px-6 py-4 flex justify-between items-center shrink-0">
+        <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
+            Advanced Measurement Tool
+        </h1>
+        <div id="status-badge" class="px-3 py-1 bg-slate-100 text-slate-600 text-sm font-medium rounded-full">
+            Status: Waiting for Image
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-hidden flex flex-col md:flex-row max-w-7xl w-full mx-auto p-4 gap-6">
+        
+        <!-- Controls Sidebar -->
+        <aside class="w-full md:w-80 flex flex-col gap-4 shrink-0">
+            
+            <!-- Global Message Box (Replaces alert) -->
+            <div id="message-box" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-sm relative">
+                <p id="message-text" class="text-sm font-medium"></p>
+                <button onclick="hideMessage()" class="absolute top-1 right-2 text-red-500 hover:text-red-700 font-bold">&times;</button>
+            </div>
+
+            <!-- Step 1: Upload -->
+            <div id="step-1" class="step-container active bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">1</div>
+                    <h2 class="font-semibold">Select Image</h2>
+                </div>
+                <p class="text-sm text-slate-500 mb-4">Choose an image containing a reference measurement (e.g., a ruler).</p>
+                <input type="file" id="image-input" accept="image/*" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-4">
+                <button onclick="renderImage()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors flex justify-center items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                    Render Image
+                </button>
+            </div>
+
+            <!-- Step 2: Calibrate (Trace Ruler) -->
+            <div id="step-2" class="step-container bg-white p-5 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-orange-400">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-6 h-6 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm">2</div>
+                    <h2 class="font-semibold">Trace Reference</h2>
+                </div>
+                <p class="text-sm text-slate-600 mb-3">Click along your ruler or reference object. You can click multiple times to follow a curved or shaky edge.</p>
+                
+                <div class="bg-slate-50 p-3 rounded border border-slate-100 mb-4 text-xs text-slate-500 font-mono">
+                    Points tracked: <span id="cal-points-count" class="font-bold text-orange-600">0</span>
+                </div>
+
+                <div class="flex gap-2">
+                    <button onclick="finishCalibrationPath()" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-md transition-colors">
+                        Finish Trace
+                    </button>
+                    <button onclick="resetCalibration()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-2 px-3 rounded-md transition-colors" title="Clear trace and start over">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Set Scale -->
+            <div id="step-3" class="step-container bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm">3</div>
+                    <h2 class="font-semibold">Set Scale</h2>
+                </div>
+                <p class="text-sm text-slate-500 mb-4">What is the actual real-world length of the path you just traced?</p>
+                
+                <div class="flex gap-2 mb-4">
+                    <input type="number" id="real-distance" placeholder="e.g. 10" step="any" class="w-2/3 border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <input type="text" id="real-unit" placeholder="Unit (cm)" value="cm" class="w-1/3 border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                
+                <button onclick="applyScale()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-md transition-colors">
+                    Confirm Scale
+                </button>
+            </div>
+
+            <!-- Step 4: Measure -->
+            <div id="step-4" class="step-container bg-white p-5 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-green-500">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center font-bold text-sm">4</div>
+                    <h2 class="font-semibold">Measure Image</h2>
+                </div>
+                <p class="text-sm text-slate-600 mb-3">Click any <strong>two points</strong> to measure the distance between them.</p>
+                
+                <div class="bg-slate-50 p-3 rounded border border-slate-100 mb-4 text-xs text-slate-700">
+                    <div><strong>Scale:</strong> <span id="scale-display">Not set</span></div>
+                </div>
+
+                <div class="space-y-2">
+                    <button onclick="clearMeasurements()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-medium py-2 px-4 rounded-md transition-colors flex justify-center items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                        Clear Measurements
+                    </button>
+                    <button onclick="startOver()" class="w-full text-slate-500 hover:text-slate-800 text-sm py-2 underline transition-colors">
+                        Load New Image
+                    </button>
+                </div>
+            </div>
+
+        </aside>
+
+        <!-- Canvas Area -->
+        <section class="flex-1 flex flex-col min-h-0 bg-slate-200/50 rounded-xl border border-slate-200 border-dashed relative">
+            <div id="canvas-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 pointer-events-none">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="mb-2 opacity-50"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                <p>Image preview will appear here</p>
+            </div>
+            
+            <div id="canvas-wrapper" class="hidden w-full h-full">
+                <canvas id="main-canvas"></canvas>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // --- Application State ---
+        let appState = 'UPLOAD'; // UPLOAD, CALIBRATING, SET_SCALE, MEASURING
+        
+        // --- Image & Canvas Variables ---
+        const canvas = document.getElementById('main-canvas');
+        const ctx = canvas.getContext('2d');
+        const canvasWrapper = document.getElementById('canvas-wrapper');
+        const canvasPlaceholder = document.getElementById('canvas-placeholder');
+        let currentImage = new Image();
+        
+        // --- Measurement Variables ---
+        let calibrationPoints = []; // Stores {x, y} for tracing ruler
+        let totalCalibrationPixels = 0;
+        let pixelsPerUnit = 0;
+        let measurementUnit = 'px';
+        
+        let completedMeasurements = []; // Array of objects { p1, p2, distance, text }
+        let activeMeasurementPoints = []; // Max 2 points {x,y}
+
+        // --- UI Elements ---
+        const badge = document.getElementById('status-badge');
+        
+        // --- Message Box Functionality ---
+        function showMessage(msg, type = 'error') {
+            const box = document.getElementById('message-box');
+            const text = document.getElementById('message-text');
+            text.innerText = msg;
+            
+            box.classList.remove('hidden', 'bg-red-100', 'border-red-500', 'text-red-700', 'bg-blue-100', 'border-blue-500', 'text-blue-700');
+            
+            if (type === 'error') {
+                box.classList.add('bg-red-100', 'border-red-500', 'text-red-700');
+            } else {
+                box.classList.add('bg-blue-100', 'border-blue-500', 'text-blue-700');
+            }
+            
+            box.classList.add('show');
+            setTimeout(hideMessage, 5000);
+        }
+
+        function hideMessage() {
+            const box = document.getElementById('message-box');
+            box.classList.remove('show');
+            setTimeout(() => { if(!box.classList.contains('show')) box.classList.add('hidden'); }, 300);
+        }
+
+        function setUIState(newState) {
+            appState = newState;
+            document.querySelectorAll('.step-container').forEach(el => el.classList.remove('active'));
+            
+            if (newState === 'UPLOAD') {
+                document.getElementById('step-1').classList.add('active');
+                badge.innerText = "Status: Waiting for Image";
+                canvasWrapper.classList.add('hidden');
+                canvasPlaceholder.classList.remove('hidden');
+            } else if (newState === 'CALIBRATING') {
+                document.getElementById('step-2').classList.add('active');
+                badge.innerText = "Status: Tracing Reference";
+                canvasWrapper.classList.remove('hidden');
+                canvasPlaceholder.classList.add('hidden');
+            } else if (newState === 'SET_SCALE') {
+                document.getElementById('step-3').classList.add('active');
+                badge.innerText = "Status: Setting Scale";
+            } else if (newState === 'MEASURING') {
+                document.getElementById('step-4').classList.add('active');
+                badge.innerText = "Status: Measuring Mode";
+            }
+        }
+
+        // --- Step 1: Render Image ---
+        function renderImage() {
+            const fileInput = document.getElementById('image-input');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showMessage("Please select an image file first.");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                currentImage.onload = function() {
+                    // Set canvas to actual image resolution to maintain accuracy
+                    canvas.width = currentImage.naturalWidth;
+                    canvas.height = currentImage.naturalHeight;
+                    
+                    // Reset variables
+                    calibrationPoints = [];
+                    completedMeasurements = [];
+                    activeMeasurementPoints = [];
+                    
+                    setUIState('CALIBRATING');
+                    updateCalibrationCount();
+                    renderCanvas();
+                }
+                currentImage.onerror = function() {
+                    showMessage("Error loading the image. Please try another file.");
+                }
+                currentImage.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        // Helper: Convert screen mouse coordinates to actual high-res canvas coordinates
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            // Scale factors in case CSS resizes the canvas
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        }
+
+        // --- Canvas Interaction Logic ---
+        canvas.addEventListener('mousedown', function(e) {
+            const pos = getCanvasCoordinates(e);
+
+            if (appState === 'CALIBRATING') {
+                // Add point to the calibration trace path
+                calibrationPoints.push(pos);
+                updateCalibrationCount();
+                renderCanvas();
+            } 
+            else if (appState === 'MEASURING') {
+                // Add point to current measurement
+                activeMeasurementPoints.push(pos);
+                
+                if (activeMeasurementPoints.length === 2) {
+                    // Calculate distance
+                    const p1 = activeMeasurementPoints[0];
+                    const p2 = activeMeasurementPoints[1];
+                    const pxDistance = calculateDistance(p1, p2);
+                    const realWorldDistance = (pxDistance / pixelsPerUnit).toFixed(2);
+                    
+                    // Save measurement
+                    completedMeasurements.push({
+                        p1: p1,
+                        p2: p2,
+                        text: `${realWorldDistance} ${measurementUnit}`
+                    });
+                    
+                    // Reset for next
+                    activeMeasurementPoints = [];
+                }
+                renderCanvas();
+            }
+            else if (appState === 'SET_SCALE') {
+                showMessage("Please confirm the scale in the sidebar before measuring.", 'info');
+            }
+        });
+
+        // --- Step 2 logic: Calibration Trace ---
+        function updateCalibrationCount() {
+            document.getElementById('cal-points-count').innerText = calibrationPoints.length;
+        }
+
+        function resetCalibration() {
+            calibrationPoints = [];
+            updateCalibrationCount();
+            renderCanvas();
+        }
+
+        function finishCalibrationPath() {
+            if (calibrationPoints.length < 2) {
+                showMessage("Please trace at least 2 points on the reference object.");
+                return;
+            }
+
+            // Calculate total pixel length of the drawn path
+            totalCalibrationPixels = 0;
+            for (let i = 0; i < calibrationPoints.length - 1; i++) {
+                totalCalibrationPixels += calculateDistance(calibrationPoints[i], calibrationPoints[i+1]);
+            }
+
+            setUIState('SET_SCALE');
+            renderCanvas(); // Redraws trace in a locked state
+        }
+
+        // --- Step 3 Logic: Set Scale ---
+        function applyScale() {
+            const distInput = document.getElementById('real-distance').value;
+            const unitInput = document.getElementById('real-unit').value || 'units';
+
+            if (!distInput || isNaN(distInput) || parseFloat(distInput) <= 0) {
+                showMessage("Please enter a valid, positive number for the distance.");
+                return;
+            }
+
+            pixelsPerUnit = totalCalibrationPixels / parseFloat(distInput);
+            measurementUnit = unitInput;
+
+            document.getElementById('scale-display').innerText = `1 ${measurementUnit} = ${pixelsPerUnit.toFixed(1)} px`;
+            
+            setUIState('MEASURING');
+        }
+
+        // --- Step 4 Logic: Measurements ---
+        function clearMeasurements() {
+            completedMeasurements = [];
+            activeMeasurementPoints = [];
+            renderCanvas();
+        }
+
+        function startOver() {
+            document.getElementById('image-input').value = "";
+            setUIState('UPLOAD');
+        }
+
+        // --- Math Helpers ---
+        function calculateDistance(p1, p2) {
+            return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        }
+
+        // --- Rendering Engine ---
+        function renderCanvas() {
+            // Clear and draw base image
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (currentImage.src) {
+                ctx.drawImage(currentImage, 0, 0);
+            }
+
+            // Helper for dynamic sizing based on image resolution
+            const strokeWidth = Math.max(canvas.width * 0.002, 2);
+            const pointRadius = Math.max(canvas.width * 0.003, 3);
+            const fontSize = Math.max(canvas.width * 0.015, 14);
+
+            // 1. Draw Calibration Trace Path
+            if (calibrationPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(calibrationPoints[0].x, calibrationPoints[0].y);
+                for (let i = 1; i < calibrationPoints.length; i++) {
+                    ctx.lineTo(calibrationPoints[i].x, calibrationPoints[i].y);
+                }
+                ctx.strokeStyle = appState === 'CALIBRATING' ? '#f97316' : '#94a3b8'; // Orange active, Gray locked
+                ctx.lineWidth = strokeWidth * 1.5;
+                ctx.setLineDash(appState === 'CALIBRATING' ? [strokeWidth*2, strokeWidth*2] : []);
+                ctx.stroke();
+                ctx.setLineDash([]); // reset
+
+                // Draw points on the trace
+                calibrationPoints.forEach(p => {
+                    drawPoint(p, appState === 'CALIBRATING' ? '#f97316' : '#94a3b8', pointRadius);
+                });
+            }
+
+            // 2. Draw Active Ongoing Measurement
+            if (activeMeasurementPoints.length > 0) {
+                drawPoint(activeMeasurementPoints[0], '#ef4444', pointRadius); // Red dot for first click
+            }
+
+            // 3. Draw Completed Measurements
+            completedMeasurements.forEach(m => {
+                // Line
+                ctx.beginPath();
+                ctx.moveTo(m.p1.x, m.p1.y);
+                ctx.lineTo(m.p2.x, m.p2.y);
+                ctx.strokeStyle = '#22c55e'; // Green
+                ctx.lineWidth = strokeWidth;
+                ctx.stroke();
+
+                // Points
+                drawPoint(m.p1, '#22c55e', pointRadius);
+                drawPoint(m.p2, '#22c55e', pointRadius);
+
+                // Label Background
+                const midX = (m.p1.x + m.p2.x) / 2;
+                const midY = (m.p1.y + m.p2.y) / 2;
+                
+                ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+                const textWidth = ctx.measureText(m.text).width;
+                const paddingX = fontSize * 0.5;
+                const paddingY = fontSize * 0.3;
+                const bgHeight = fontSize + paddingY * 2;
+                
+                ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+                ctx.beginPath();
+                ctx.roundRect(midX - textWidth/2 - paddingX, midY - bgHeight/2, textWidth + paddingX*2, bgHeight, 4);
+                ctx.fill();
+
+                // Label Text
+                ctx.fillStyle = "#ffffff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(m.text, midX, midY);
+            });
+        }
+
+        function drawPoint(p, color, radius) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI, false);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.lineWidth = radius * 0.5;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+        }
+
+        // Initialize state
+        setUIState('UPLOAD');
+
+    </script>
+</body>
+</html>
