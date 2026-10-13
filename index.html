@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Image Measurement Tool</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+        }
+        h2 { margin-top: 0; }
+        .step {
+            display: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .step.active { display: block; }
+        input[type="file"], input[type="number"], input[type="text"], button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #0056b3; }
+        button.secondary { background-color: #6c757d; }
+        button.secondary:hover { background-color: #5a6268; }
+        
+        #canvas-container {
+            position: relative;
+            max-width: 100%;
+            overflow: auto;
+            background: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        .status-text {
+            font-size: 16px;
+            font-weight: bold;
+            color: #d9534f;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <h2>📏 Image Measurement Tool</h2>
+        
+        <div id="step-upload" class="step active">
+            <p><strong>Step 1:</strong> Select an image containing a reference object (like a ruler or coin).</p>
+            <input type="file" id="imageUpload" accept="image/*">
+        </div>
+
+        <div id="step-calibrate-clicks" class="step">
+            <p class="status-text"><strong>Step 2:</strong> Click the TWO ends of your reference object on the image.</p>
+            <button class="secondary" onclick="resetTool()">Start Over</button>
+        </div>
+
+        <div id="step-calibrate-input" class="step">
+            <p><strong>Step 3:</strong> Enter the real-world distance between the two points you just clicked.</p>
+            <input type="number" id="refDistance" placeholder="Distance (e.g., 10)" step="any">
+            <input type="text" id="refUnit" placeholder="Unit (e.g., cm, in)">
+            <button onclick="setCalibration()">Set Reference Scale</button>
+            <button class="secondary" onclick="resetCalibrationClicks()">Redraw Reference</button>
+        </div>
+
+        <div id="step-measure" class="step">
+            <p class="status-text"><strong>Step 4:</strong> Click any TWO points on the image to measure the distance.</p>
+            <p>Current Scale: <span id="scaleDisplay"></span></p>
+            <button onclick="clearMeasurements()">Clear Measurements</button>
+            <button class="secondary" onclick="resetTool()">Load New Image</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const imageUpload = document.getElementById('imageUpload');
+        
+        let img = new Image();
+        let state = 'upload'; // upload, calibrate_clicks, calibrate_input, measure
+        let refPoints = [];
+        let pixelsPerUnit = 0;
+        let unitName = '';
+        
+        let currentMeasurePoints = [];
+        let allMeasurements = []; // Stores completed measurements
+
+        // Load Image
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    switchState('calibrate_clicks');
+                    redraw();
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        });
+
+        // Handle Canvas Clicks
+        canvas.addEventListener('mousedown', function(e) {
+            if (state === 'upload' || state === 'calibrate_input') return;
+
+            const pos = getMousePos(canvas, e);
+
+            if (state === 'calibrate_clicks') {
+                if (refPoints.length < 2) {
+                    refPoints.push(pos);
+                    redraw();
+                    if (refPoints.length === 2) {
+                        switchState('calibrate_input');
+                    }
+                }
+            } else if (state === 'measure') {
+                if (currentMeasurePoints.length < 2) {
+                    currentMeasurePoints.push(pos);
+                    redraw();
+                    if (currentMeasurePoints.length === 2) {
+                        // Calculate and save measurement
+                        const pxDist = distance(currentMeasurePoints[0], currentMeasurePoints[1]);
+                        const realDist = (pxDist / pixelsPerUnit).toFixed(2);
+                        allMeasurements.push({
+                            p1: currentMeasurePoints[0],
+                            p2: currentMeasurePoints[1],
+                            text: `${realDist} ${unitName}`
+                        });
+                        currentMeasurePoints = []; // Reset for next measurement
+                        redraw();
+                    }
+                }
+            }
+        });
+
+        // Calculate Scale
+        function setCalibration() {
+            const distInput = document.getElementById('refDistance').value;
+            const unitInput = document.getElementById('refUnit').value || 'units';
+            
+            if (!distInput || isNaN(distInput) || distInput <= 0) {
+                alert('Please enter a valid number for the distance.');
+                return;
+            }
+
+            const pxDist = distance(refPoints[0], refPoints[1]);
+            pixelsPerUnit = pxDist / parseFloat(distInput);
+            unitName = unitInput;
+
+            document.getElementById('scaleDisplay').innerText = `1 ${unitName} = ${pixelsPerUnit.toFixed(2)} pixels`;
+            switchState('measure');
+            redraw();
+        }
+
+        // Draw everything
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (img.src) ctx.drawImage(img, 0, 0);
+
+            // Draw Reference Line
+            if (refPoints.length > 0) {
+                drawPoint(refPoints[0], '#007bff');
+                if (refPoints.length > 1) {
+                    drawPoint(refPoints[1], '#007bff');
+                    drawLine(refPoints[0], refPoints[1], '#007bff');
+                }
+            }
+
+            // Draw Ongoing Measurement
+            if (currentMeasurePoints.length > 0) {
+                drawPoint(currentMeasurePoints[0], '#d9534f');
+            }
+
+            // Draw Completed Measurements
+            allMeasurements.forEach(m => {
+                drawPoint(m.p1, '#28a745');
+                drawPoint(m.p2, '#28a745');
+                drawLine(m.p1, m.p2, '#28a745');
+                drawLabel(m.p1, m.p2, m.text);
+            });
+        }
+
+        // --- Helper Functions ---
+
+        function switchState(newState) {
+            state = newState;
+            document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`step-${newState.replace('_', '-')}`).classList.add('active');
+        }
+
+        function getMousePos(canvas, evt) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (evt.clientX - rect.left) * scaleX,
+                y: (evt.clientY - rect.top) * scaleY
+            };
+        }
+
+        function distance(p1, p2) {
+            return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+        }
+
+        function drawPoint(p, color) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, Math.max(canvas.width * 0.003, 3), 0, 2 * Math.PI, false);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'white';
+            ctx.stroke();
+        }
+
+        function drawLine(p1, p2, color) {
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(canvas.width * 0.002, 2);
+            ctx.stroke();
+        }
+
+        function drawLabel(p1, p2, text) {
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            
+            // Background for text
+            ctx.font = `bold ${Math.max(canvas.width * 0.015, 14)}px Arial`;
+            const textWidth = ctx.measureText(text).width;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(midX - textWidth/2 - 5, midY - 15, textWidth + 10, 24);
+
+            // Text
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, midX, midY - 2);
+        }
+
+        function resetCalibrationClicks() {
+            refPoints = [];
+            switchState('calibrate_clicks');
+            redraw();
+        }
+
+        function clearMeasurements() {
+            allMeasurements = [];
+            currentMeasurePoints = [];
+            redraw();
+        }
+
+        function resetTool() {
+            img = new Image();
+            imageUpload.value = "";
+            refPoints = [];
+            currentMeasurePoints = [];
+            allMeasurements = [];
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            switchState('upload');
+        }
+    </script>
+</body>
+</html>
